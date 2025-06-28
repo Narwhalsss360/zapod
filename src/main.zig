@@ -146,7 +146,7 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
         "help",
         CommandFunction {
             .function = helpCommand,
-            .description = "Show help.",
+            .description = "Show help. usage: <command name: optional string>",
         },
     },
     .{
@@ -160,7 +160,7 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
         "fetch-single",
         CommandFunction {
             .function = fetchSingle,
-            .description = "Fetch an apod.",
+            .description = "Fetch an apod. usage: <date: YYYY-MM-DD>",
         },
     }
 });
@@ -216,11 +216,21 @@ fn print_error(comptime fmt: []const u8, args: anytype) !void {
 }
 
 fn helpCommand(allocator: Allocator, args: *ArgIterator) Error!void {
-    _ = .{ allocator, args };
-    try print("zapod help:\n", .{});
-    for (command_map.keys()) |command_name| {
-        try print("    {s}: {s}\n", .{command_name, command_map.get(command_name).?.description});
-    }
+    _ = allocator;
+    const command_name = args.next() orelse {
+        try print("zapod help:\n", .{});
+        for (command_map.keys()) |command_name| {
+            try print("    {s}: {s}\n", .{command_name, command_map.get(command_name).?.description});
+        }
+        return;
+    };
+
+    const command = command_map.get(command_name) orelse {
+        try print_error("'{s}' is not a command, use help without arguments to list commands.\n", .{command_name});
+        return;
+    };
+
+    try print("    {s}: {s}\n", .{command_name, command.description});
 }
 
 fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
