@@ -85,9 +85,26 @@ const Configuration = struct {
 
 const CommandFunctionPointer = *const fn(Allocator, *ArgIterator) Error!void;
 
-const command_map = StaticStringMap(CommandFunctionPointer).initComptime(.{
-    .{ "help", helpCommand },
-    .{ "list", listCommand }
+const CommandFunction = struct {
+    function: CommandFunctionPointer = undefined,
+    description: []const u8 = undefined,
+};
+
+const command_map = StaticStringMap(CommandFunction).initComptime(.{
+    .{
+        "help",
+        CommandFunction {
+            .function = helpCommand,
+            .description = "Show help.",
+        },
+    },
+    .{
+        "list",
+        CommandFunction {
+            .function = listCommand,
+            .description = "List all locally saved APODs.",
+        },
+    }
 });
 
 const APOD = struct {
@@ -143,8 +160,8 @@ fn print_error(comptime fmt: []const u8, args: anytype) !void {
 fn helpCommand(allocator: Allocator, args: *ArgIterator) Error!void {
     _ = .{ allocator, args };
     try print("zapod help:\n", .{});
-    for (command_map.keys()) |command| {
-        try print("    {s}\n", .{command});
+    for (command_map.keys()) |command_name| {
+        try print("    {s}: {s}\n", .{command_name, command_map.get(command_name).?.description});
     }
 }
 
@@ -206,5 +223,5 @@ pub fn main() !void {
         try print_error("'{s}' is not a command", .{command_name});
         return;
     };
-    return command_function(allocator, &args);
+    return command_function.function(allocator, &args);
 }
