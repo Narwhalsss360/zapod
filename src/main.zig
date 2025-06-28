@@ -28,7 +28,8 @@ const Error =
     std.fs.Dir.RealPathAllocError ||
     File.OpenError ||
     getErrorSetOf(File.readToEndAlloc) ||
-    std.posix.MakeDirError;
+    std.posix.MakeDirError ||
+    std.json.ParseError(std.json.Scanner);
 
 const Configuration = struct {
     api_key: ?[]const u8 = undefined,
@@ -100,6 +101,20 @@ const APOD = struct {
     thumbnail_url: ?[]u8 = null,
     copyright: ?[]u8 = null,
     service_version: ?[]u8 = null,
+
+    pub fn format(
+        self: *const APOD,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype
+    ) !void {
+        _ = .{ fmt, options };
+
+        try writer.print(
+            "{s} ({s}) - {s}",
+            .{ self.date, self.media_type, self.title }
+        );
+    }
 };
 
 const ERROR_RENDER = "\x1b[1;37;41m";
@@ -162,7 +177,13 @@ fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
         var file = try std.fs.openFileAbsolute(absolute, .{ .mode = .read_only });
         const buffer = try file.readToEndAlloc(allocator, 0xFFFF);
         defer allocator.free(buffer);
-        try print("{s}", .{buffer});
+
+        const apod = try std.json.parseFromSlice(APOD, allocator, buffer, .{
+            .ignore_unknown_fields = true
+        });
+        defer apod.deinit();
+
+        try print("{s}", .{apod.value});
     }
 }
 
