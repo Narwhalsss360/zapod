@@ -11,7 +11,8 @@ const StaticStringMap = std.StaticStringMap;
 const panic = std.debug.panic;
 
 const APODManagerError = error {
-    NoAPIkey
+    NoAPIkey,
+    InvalidDateFormat
 };
 
 fn getErrorSetOf(comptime must_be_fn: anytype) type {
@@ -80,6 +81,30 @@ const Configuration = struct {
         if (self.apods_media_path_alloc) {
             self.allocator.free(self.apods_media_path);
         }
+    }
+};
+
+const APODDate = struct {
+    year: u16,
+    month: u8,
+    day: u8,
+
+    pub fn init(date: []const u8) APODManagerError!APODDate {
+        if (date.len < 4 + 1 + 2 + 1 + 2) {
+            return APODManagerError.InvalidDateFormat;
+        }
+
+        return APODDate {
+            .year = std.fmt.parseInt(u16, date[0..4], 10) catch {
+                return APODManagerError.InvalidDateFormat;
+            },
+            .month = std.fmt.parseInt(u8, date[5..7], 10) catch {
+                return APODManagerError.InvalidDateFormat;
+            },
+            .day = std.fmt.parseInt(u8, date[8..10], 10) catch {
+                return APODManagerError.InvalidDateFormat;
+            }
+        };
     }
 };
 
@@ -200,7 +225,7 @@ fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
         });
         defer apod.deinit();
 
-        try print("{s}", .{apod.value});
+        try print("{s}\n", .{apod.value});
     }
 }
 
