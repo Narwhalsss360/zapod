@@ -19,8 +19,18 @@ const command_map = StaticStringMap(CommandFunctionPointer).initComptime(.{
 const ERROR_RENDER = "\x1b[1;37;41m";
 const RESET_RENDER = "\x1b[0m";
 
+fn print(comptime fmt: []const u8, args: anytype) !void {
+    return std.io
+        .getStdOut()
+        .writer()
+        .print(
+            fmt,
+            args
+        );
+}
+
 fn print_error(comptime fmt: []const u8, args: anytype) !void {
-    try std.io
+    return std.io
         .getStdErr()
         .writer()
         .print(
