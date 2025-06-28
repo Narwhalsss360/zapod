@@ -27,7 +27,8 @@ const Error =
     APODManagerError ||
     std.fs.Dir.RealPathAllocError ||
     File.OpenError ||
-    getErrorSetOf(File.readToEndAlloc);
+    getErrorSetOf(File.readToEndAlloc) ||
+    std.posix.MakeDirError;
 
 const Configuration = struct {
     api_key: ?[]const u8 = undefined,
@@ -155,7 +156,10 @@ fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
             continue;
         }
 
-        var file = try std.fs.openFileAbsolute(entry.name, .{ .mode = .read_only });
+        const absolute = try std.fs.path.join(allocator, &[_][]const u8 { config.apods_path, entry.name });
+        defer allocator.free(absolute);
+
+        var file = try std.fs.openFileAbsolute(absolute, .{ .mode = .read_only });
         const buffer = try file.readToEndAlloc(allocator, 0xFFFF);
         defer allocator.free(buffer);
         try print("{s}", .{buffer});
