@@ -12,7 +12,10 @@ const panic = std.debug.panic;
 
 const APODManagerError = error {
     NoAPIkey,
-    InvalidDateFormat
+    InvalidDateFormat,
+    MissingArgument,
+    InvalidAPIKey,
+    FetchError
 };
 
 fn getErrorSetOf(comptime must_be_fn: anytype) type {
@@ -30,7 +33,9 @@ const Error =
     File.OpenError ||
     getErrorSetOf(File.readToEndAlloc) ||
     std.posix.MakeDirError ||
-    std.json.ParseError(std.json.Scanner);
+    std.json.ParseError(std.json.Scanner) ||
+    getErrorSetOf(std.http.Client.fetch) ||
+    std.fs.Dir.AccessError;
 
 const Configuration = struct {
     api_key: ?[]const u8 = undefined,
@@ -106,6 +111,27 @@ const APODDate = struct {
             }
         };
     }
+
+    pub fn str(self: *const APODDate) ![10]u8 {
+        var buffer: [10]u8 = [10]u8 { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var buffer_stream = std.io.fixedBufferStream(&buffer);
+        try buffer_stream.writer().print("{s}", .{self});
+        return buffer;
+    }
+
+    pub fn format(
+        self: *const APODDate,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype
+    ) !void {
+        _ = .{ fmt, options };
+
+        try writer.print(
+            "{d:04.}-{d:02.}-{d:02.}",
+            .{ self.year, self.month, self.day }
+        );
+    }
 };
 
 const CommandFunctionPointer = *const fn(Allocator, *ArgIterator) Error!void;
@@ -128,6 +154,13 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
         CommandFunction {
             .function = listCommand,
             .description = "List all locally saved APODs.",
+        },
+    },
+    .{
+        "fetch-single",
+        CommandFunction {
+            .function = fetchSingle,
+            .description = "Fetch an apod.",
         },
     }
 });
@@ -227,6 +260,93 @@ fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
 
         try print("{s}\n", .{apod.value});
     }
+}
+
+fn headersLength(header_buffer: []const u8) usize {
+    var i: usize = 0;
+    while (i < header_buffer.len - 1) : (i += 1) {
+        if (header_buffer[i] == '\r' and header_buffer[i + 1] == '\n') {
+            if (i + 3 >= header_buffer.len) {
+                return header_buffer.len;
+            }
+            if (header_buffer[i + 2] == '\r' and header_buffer[i + 3] == '\n') {
+                return i;
+            }
+        }
+    }
+    return header_buffer.len;
+}
+
+fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100:0]u8 {
+    if (api_key.len != 40) {
+        return APODManagerError.InvalidAPIKey;
+    }
+    try print("{s}\n", .{date});
+    return
+        "https://api.nasa.gov/planetary/apod?api_key=" ++
+        (api_key[0..40].*)  ++
+        "&date=" ++ date;
+}
+
+fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
+    var config = try Configuration.init(allocator);
+    defer config.deinit();
+
+    const date_arg = args.next() orelse {
+        try print_error("Missing required argument: date YYYY-MM-DD", .{});
+        return APODManagerError.MissingArgument;
+    };
+    const date_string = try (try APODDate.init(date_arg)).str();
+
+    const apods_dir = try openDirAbsolute(config.apods_path, .{ .iterate = true });
+
+    if (apods_dir.access(date_string ++ ".json", .{})) {
+        try print_error("APOD {s} already exists locally.", .{date_string});
+        return;
+    } else |err| {
+        if (err != error.FileNotFound) {
+            return err;
+        }
+    }
+
+    if (config.api_key == null) {
+        try print_error("An API Key is required for this operation.", .{});
+        return APODManagerError.NoAPIkey;
+    }
+
+    var header_buffer: [0x1FFF]u8 = undefined;
+    var response_storage_buffer: [0x7FFF]u8 = undefined;
+    var response_storage=  std.ArrayListUnmanaged(u8).initBuffer(&response_storage_buffer);
+    const url = (try fetchSingleEndPoint(config.api_key.?, date_string)).*;
+    var client = std.http.Client { .allocator = allocator };
+    defer client.deinit();
+
+    const result = try client.fetch(.{
+        .location = .{
+            .url = &url
+        },
+        .server_header_buffer = &header_buffer,
+        .response_storage = .{
+            .static = &response_storage
+        }
+    });
+
+    if (result.status != std.http.Status.ok) {
+        try print_error("Fetch error (Status: {d})\nHeaders:\n{s}\nContent:{s}\n", .{result.status, header_buffer[0..headersLength(&header_buffer)], response_storage.items});
+        return APODManagerError.FetchError;
+    }
+    const apod = try std.json.parseFromSlice(APOD, allocator, response_storage.items, .{
+        .ignore_unknown_fields = true
+    });
+    defer apod.deinit();
+
+    const absolute = try std.fs.path.join(allocator, &[_][]const u8 { config.apods_path, date_string ++ ".json" });
+    defer allocator.free(absolute);
+    const file = try std.fs.createFileAbsolute(absolute, .{ .exclusive = true });
+    defer file.close();
+
+    try std.json.stringify(apod.value, .{ .whitespace = .indent_4 }, file.writer());
+    try print("{s}.json\n", .{apod.value.date});
 }
 
 pub fn main() !void {
