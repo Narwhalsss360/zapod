@@ -1,12 +1,12 @@
-# ignorer 2025-06-27T21:50:02.820982 === Generated source ignore file. ===
+[0-3][0-9][0-9][0-9]-[0-1][0-9]-[0-9][0-9]*
 
-# ignorer === TEMPLATE Zig START ===
+=== start Zig.gitignore ===
 .zig-cache/
 zig-out/
 *.o
-# ignorer === TEMPLATE Zig END ===
+=== end Zig.gitignore ===
 
-# ignorer === TEMPLATE C START ===
+=== start C.gitignore ===
 # Prerequisites
 *.d
 
@@ -62,9 +62,9 @@ dkms.conf
 
 # debug information files
 *.dwo
-# ignorer === TEMPLATE C END ===
+=== end C.gitignore ===
 
-# ignorer === TEMPLATE C++ START ===
+=== start C++.gitignore ===
 # Prerequisites
 *.d
 
@@ -106,9 +106,9 @@ dkms.conf
 
 # debug information files
 *.dwo
-# ignorer === TEMPLATE C++ END ===
+=== end C++.gitignore ===
 
-# ignorer === TEMPLATE Global/VisualStudioCode START ===
+=== start Global/VisualStudioCode.gitignore ===
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
@@ -119,6 +119,4 @@ dkms.conf
 
 # Built Visual Studio Code Extensions
 *.vsix
-# ignorer === TEMPLATE Global/VisualStudioCode END ===
-
-# ignorer 2025-06-27T21:50:02.821163 === Generated source ignore file. ===
+=== end Global/VisualStudioCode.gitignore ===
