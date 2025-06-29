@@ -162,6 +162,13 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
             .function = fetchSingle,
             .description = "Fetch an apod. usage: <date: YYYY-MM-DD>",
         },
+    },
+    .{
+        "details",
+        CommandFunction {
+            .function = details,
+            .description = "Show details of an APOD that exists locally. usage: <date: YYYY-MM-DD>"
+        }
     }
 });
 
@@ -183,7 +190,22 @@ const APOD = struct {
         options: std.fmt.FormatOptions,
         writer: anytype
     ) !void {
-        _ = .{ fmt, options };
+        _ = .{ options };
+ 
+        if (fmt.len > 0 and fmt[0] == 'D') {
+            try writer.print(
+                \\{s} ({s}) - {s} (C) {s}
+                \\{s}
+                \\Media:{s}
+                ,
+                .{
+                    self.date, self.media_type, self.title, self.copyright orelse "",
+                    self.explanation,
+                    self.hdurl orelse self.url
+                }
+            );
+            return;
+        }
 
         try writer.print(
             "{s} ({s}) - {s}",
@@ -272,6 +294,22 @@ fn listCommand(allocator: Allocator, args: *ArgIterator) Error!void {
     }
 }
 
+fn loadLocal(allocator: Allocator, date: APODDate) !std.json.Parsed(APOD) {
+    var config = try Configuration.init(allocator);
+    defer config.deinit();
+
+    const file_name = try date.str() ++ ".json";
+    const absolute = try std.fs.path.join(allocator, &[_][]const u8 { config.apods_path, file_name });
+    defer allocator.free(absolute);
+
+    var file = try std.fs.openFileAbsolute(absolute, .{ .mode = .read_only });
+    const buffer = try file.readToEndAlloc(allocator, 0xFFFF);
+    defer allocator.free(buffer);
+    return std.json.parseFromSlice(APOD, allocator, buffer, .{
+        .ignore_unknown_fields = true
+    });
+}
+
 fn headersLength(header_buffer: []const u8) usize {
     var i: usize = 0;
     while (i < header_buffer.len - 1) : (i += 1) {
@@ -357,6 +395,17 @@ fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
 
     try std.json.stringify(apod.value, .{ .whitespace = .indent_4 }, file.writer());
     try print("{s}.json\n", .{apod.value.date});
+}
+
+fn details(allocator: Allocator, args: *ArgIterator) Error!void {
+    const date_arg = args.next() orelse {
+        try print_error("Missing required argument: date YYYY-MM-DD", .{});
+        return APODManagerError.MissingArgument;
+    };
+    const apod = try loadLocal(allocator, try APODDate.init(date_arg));
+    defer apod.deinit();
+
+    try print("{D}", .{apod.value});
 }
 
 pub fn main() !void {
