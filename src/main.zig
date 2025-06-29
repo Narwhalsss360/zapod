@@ -172,6 +172,13 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
         }
     },
     .{
+        "fetch-range",
+        CommandFunction {
+            .function = fetchRange,
+            .description = "Fetch a range of apods. usage: <start_date: YYYY-MM-DD> <end_date: YYYY-MM-DD>"
+        }
+    },
+    .{
         "details",
         CommandFunction {
             .function = details,
@@ -364,9 +371,15 @@ fn fetchRandomEndPoint(allocator: Allocator, api_key: []const u8, count: u8) ![]
     return endpoint;
 }
 
-fn fetchRangeEndPoint(api_key: []const u8, start_date: [10]u8, end_date: [10]u8) [GET_ENDPOINT + 40 + START_DATE_PARAM.len + 10 + END_DATE_PARAM + 10]u8 {
-    _ = .{ api_key, start_date, end_date };
-    return undefined;
+fn fetchRangeEndPoint(api_key: []const u8, start_date: [10]u8, end_date: [10]u8) !*const [GET_ENDPOINT.len + 40 + START_DATE_PARAM.len + 10 + END_DATE_PARAM.len + 10]u8 {
+    if (api_key.len != 40) {
+        return APODManagerError.InvalidAPIKey;
+    }
+    return
+        GET_ENDPOINT ++
+        (api_key[0..40].*) ++
+        START_DATE_PARAM ++ start_date ++
+        END_DATE_PARAM ++ end_date;
 }
 
 fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
@@ -461,6 +474,63 @@ fn fetchRandom(allocator: Allocator, args: *ArgIterator) Error!void {
     const result = try client.fetch(.{
         .location = .{
             .url = url
+        },
+        .server_header_buffer = &header_buffer,
+        .response_storage = .{
+            .static = &response_storage
+        }
+    });
+
+    if (result.status != std.http.Status.ok) {
+        try print_error("Fetch error (Status: {d})\nHeaders:\n{s}\nContent:{s}\n", .{result.status, header_buffer[0..headersLength(&header_buffer)], response_storage.items});
+        return APODManagerError.FetchError;
+    }
+
+    const apods = try std.json.parseFromSlice([]APOD, allocator, response_storage.items, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    defer apods.deinit();
+
+    for (apods.value) |apod| {
+        const absolute = try std.fs.path.join(allocator, &[_][]const u8 { config.apods_path, (apod.date[0..10]).* ++ ".json" });
+        defer allocator.free(absolute);
+        const file = try std.fs.createFileAbsolute(absolute, .{});
+        defer file.close();
+
+        try std.json.stringify(apod, .{ .whitespace = .indent_4 }, file.writer());
+        try print("{s}.json\n", .{apod.date});
+    }
+}
+
+fn fetchRange(allocator: Allocator, args: *ArgIterator) !void {
+    var config = try Configuration.init(allocator);
+    defer config.deinit();
+
+    if (config.api_key == null) {
+        try print_error("An API Key is required for this operation.", .{});
+        return APODManagerError.NoAPIkey;
+    }
+
+    const start_date_string = args.next() orelse {
+        try print_error("Missing 'start_date' argument.", .{});
+        return APODManagerError.MissingArgument;
+    };
+    const start_date = try (try APODDate.init(start_date_string)).str();
+
+    const end_date_string = args.next() orelse {
+        try print_error("Missing 'end_date' argument.", .{});
+        return APODManagerError.MissingArgument;
+    };
+    const end_date = try (try APODDate.init(end_date_string)).str();
+
+    var header_buffer: [0x1FFF]u8 = undefined;
+    var response_storage_buffer: [0x7FFF]u8 = undefined;
+    var response_storage=  std.ArrayListUnmanaged(u8).initBuffer(&response_storage_buffer);
+    const url = (try fetchRangeEndPoint(config.api_key.?, start_date, end_date)).*;
+    var client = std.http.Client { .allocator = allocator };
+    defer client.deinit();
+
+    const result = try client.fetch(.{
+        .location = .{
+            .url = &url
         },
         .server_header_buffer = &header_buffer,
         .response_storage = .{
