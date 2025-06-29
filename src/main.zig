@@ -42,8 +42,6 @@ const Configuration = struct {
     api_key: ?[]const u8 = undefined,
     apods_path: []const u8 = undefined,
     apods_path_alloc: bool = false,
-    apods_media_path: []const u8 = undefined,
-    apods_media_path_alloc: bool = false,
     env: std.process.EnvMap = undefined,
     allocator: Allocator = undefined,
 
@@ -59,22 +57,11 @@ const Configuration = struct {
             apods_path_alloc = true;
         }
 
-        var apods_media_path: []const u8 = undefined;
-        var apods_media_path_alloc = false;
-        if (env.get("APODS_MEDIA_PATH")) |path| {
-            apods_media_path = path;
-        } else {
-            apods_media_path = try std.fs.cwd().realpathAlloc(allocator, ".");
-            apods_media_path_alloc = true;
-        }
-
         return Configuration {
             .env = env,
             .api_key = env.get("APOD_API_KEY"),
             .apods_path = apods_path,
             .apods_path_alloc = apods_path_alloc,
-            .apods_media_path = apods_media_path,
-            .apods_media_path_alloc = apods_media_path_alloc,
             .allocator = allocator
         };
     }
@@ -83,9 +70,6 @@ const Configuration = struct {
         self.env.deinit();
         if (self.apods_path_alloc) {
             self.allocator.free(self.apods_path);
-        }
-        if (self.apods_media_path_alloc) {
-            self.allocator.free(self.apods_media_path);
         }
     }
 };
