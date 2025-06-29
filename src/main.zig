@@ -15,6 +15,7 @@ const APODManagerError = error {
     InvalidDateFormat,
     MissingArgument,
     InvalidAPIKey,
+    InvalidArgument,
     FetchError
 };
 
@@ -164,6 +165,13 @@ const command_map = StaticStringMap(CommandFunction).initComptime(.{
         },
     },
     .{
+        "fetch-random",
+        CommandFunction {
+            .function = fetchRandom,
+            .description = "Fetch a random count of apods. usage: <count: 1-100>"
+        }
+    },
+    .{
         "details",
         CommandFunction {
             .function = details,
@@ -214,6 +222,7 @@ const APOD = struct {
     }
 };
 
+const GET_ENDPOINT = "https://api.nasa.gov/planetary/apod?api_key=";
 const ERROR_RENDER = "\x1b[1;37;41m";
 const RESET_RENDER = "\x1b[0m";
 
@@ -331,9 +340,23 @@ fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100:0]u8 {
     }
     try print("{s}\n", .{date});
     return
-        "https://api.nasa.gov/planetary/apod?api_key=" ++
+        GET_ENDPOINT ++
         (api_key[0..40].*)  ++
         "&date=" ++ date;
+}
+
+fn fetchRandomEndPoint(allocator: Allocator, api_key: []const u8, count: u8) ![]u8 {
+    const count_param = "&count=";
+    const endpoint = try allocator.alloc(u8, GET_ENDPOINT.len + 40 + count_param.len + 3);
+    std.mem.copyForwards(u8, endpoint, GET_ENDPOINT);
+    std.mem.copyForwards(u8, endpoint[GET_ENDPOINT.len..], api_key);
+    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40)..], count_param);
+
+    var count_buffer: [3]u8 = [3]u8 { 0, 0, 0 };
+    var count_buffer_stream = std.io.fixedBufferStream(&count_buffer);
+    try count_buffer_stream.writer().print("{d:03}", .{count});
+    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40 + count_param.len)..], &count_buffer);
+    return endpoint;
 }
 
 fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
@@ -395,6 +418,63 @@ fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
 
     try std.json.stringify(apod.value, .{ .whitespace = .indent_4 }, file.writer());
     try print("{s}.json\n", .{apod.value.date});
+}
+
+fn fetchRandom(allocator: Allocator, args: *ArgIterator) Error!void {
+    var config = try Configuration.init(allocator);
+    defer config.deinit();
+
+    if (config.api_key == null) {
+        try print_error("An API Key is required for this operation.", .{});
+        return APODManagerError.NoAPIkey;
+    }
+
+    const count_string = args.next() orelse {
+        try print_error("Missing 'count' argument.", .{});
+        return APODManagerError.MissingArgument;
+    };
+    const count = try std.fmt.parseInt(u8, count_string, 10);
+
+    if (count == 0 or count > 100) {
+        try print_error("'count' must be between 1 and 100.", .{});
+        return APODManagerError.InvalidArgument;
+    }
+
+    var header_buffer: [0x1FFF]u8 = undefined;
+    var response_storage_buffer: [0x7FFF]u8 = undefined;
+    var response_storage=  std.ArrayListUnmanaged(u8).initBuffer(&response_storage_buffer);
+    const url = try fetchRandomEndPoint(allocator,config.api_key.?, count);
+    defer allocator.free(url);
+    var client = std.http.Client { .allocator = allocator };
+    defer client.deinit();
+
+    const result = try client.fetch(.{
+        .location = .{
+            .url = url
+        },
+        .server_header_buffer = &header_buffer,
+        .response_storage = .{
+            .static = &response_storage
+        }
+    });
+
+    if (result.status != std.http.Status.ok) {
+        try print_error("Fetch error (Status: {d})\nHeaders:\n{s}\nContent:{s}\n", .{result.status, header_buffer[0..headersLength(&header_buffer)], response_storage.items});
+        return APODManagerError.FetchError;
+    }
+
+    const apods = try std.json.parseFromSlice([]APOD, allocator, response_storage.items, .{ .ignore_unknown_fields = true, .allocate = .alloc_always });
+    defer apods.deinit();
+
+    for (apods.value) |apod| {
+        const absolute = try std.fs.path.join(allocator, &[_][]const u8 { config.apods_path, (apod.date[0..10]).* ++ ".json" });
+        defer allocator.free(absolute);
+        const file = try std.fs.createFileAbsolute(absolute, .{});
+        defer file.close();
+
+        try std.json.stringify(apod, .{ .whitespace = .indent_4 }, file.writer());
+        try print("{s}.json\n", .{apod.date});
+    }
 }
 
 fn details(allocator: Allocator, args: *ArgIterator) Error!void {
