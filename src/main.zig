@@ -223,6 +223,9 @@ const APOD = struct {
 };
 
 const GET_ENDPOINT = "https://api.nasa.gov/planetary/apod?api_key=";
+const COUNT_PARAM = "&count=";
+const START_DATE_PARAM = "&start_date=";
+const END_DATE_PARAM = "&end_date=";
 const ERROR_RENDER = "\x1b[1;37;41m";
 const RESET_RENDER = "\x1b[0m";
 
@@ -334,7 +337,7 @@ fn headersLength(header_buffer: []const u8) usize {
     return header_buffer.len;
 }
 
-fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100:0]u8 {
+fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100]u8 {
     if (api_key.len != 40) {
         return APODManagerError.InvalidAPIKey;
     }
@@ -346,17 +349,24 @@ fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100:0]u8 {
 }
 
 fn fetchRandomEndPoint(allocator: Allocator, api_key: []const u8, count: u8) ![]u8 {
-    const count_param = "&count=";
-    const endpoint = try allocator.alloc(u8, GET_ENDPOINT.len + 40 + count_param.len + 3);
+    if (api_key.len != 40) {
+        return APODManagerError.InvalidAPIKey;
+    }
+    const endpoint = try allocator.alloc(u8, GET_ENDPOINT.len + 40 + COUNT_PARAM.len + 3);
     std.mem.copyForwards(u8, endpoint, GET_ENDPOINT);
     std.mem.copyForwards(u8, endpoint[GET_ENDPOINT.len..], api_key);
-    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40)..], count_param);
+    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40)..], COUNT_PARAM);
 
     var count_buffer: [3]u8 = [3]u8 { 0, 0, 0 };
     var count_buffer_stream = std.io.fixedBufferStream(&count_buffer);
     try count_buffer_stream.writer().print("{d:03}", .{count});
-    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40 + count_param.len)..], &count_buffer);
+    std.mem.copyForwards(u8, endpoint[(GET_ENDPOINT.len + 40 + COUNT_PARAM.len)..], &count_buffer);
     return endpoint;
+}
+
+fn fetchRangeEndPoint(api_key: []const u8, start_date: [10]u8, end_date: [10]u8) [GET_ENDPOINT + 40 + START_DATE_PARAM.len + 10 + END_DATE_PARAM + 10]u8 {
+    _ = .{ api_key, start_date, end_date };
+    return undefined;
 }
 
 fn fetchSingle(allocator: Allocator, args: *ArgIterator) Error!void {
