@@ -332,7 +332,6 @@ fn fetchSingleEndPoint(api_key: []const u8, date: [10]u8) !*const [100]u8 {
     if (api_key.len != 40) {
         return APODManagerError.InvalidAPIKey;
     }
-    try print("{s}\n", .{date});
     return
         GET_ENDPOINT ++
         (api_key[0..40].*)  ++
